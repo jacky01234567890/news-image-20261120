@@ -1,166 +1,201 @@
 #!/usr/bin/env python3
-"""Draw the news-image entry: one 1024x1024 front page summing up the world news
-of Friday 20 November 2026.
+"""Draw the front page for Friday 20 November 2026 as a 1024x1024 PNG.
 
-The image is drawn, not photographed or AI-generated, so every word is exactly
-what the sources reported and nothing is garbled. It is built to be read by the
-judge at a glance: the date is the biggest line after the masthead, the lead
-story is Russia's largest strike of November on Ukraine, with missiles falling
-in NATO-member Poland, and four more stories cover the Wall Street AI sell-off,
-Trump's White House news conference, Cyclone Akvan and the Peru earthquake,
-with a briefs strip for the rest.
+A newspaper front page: eyebrow line, WORLD NEWS masthead, the date in red,
+the lead story on Russia's November strike on Ukraine, two rows of two
+stories (Wall Street, the White House, Cyclone Akvan, the Peru earthquake),
+an ALSO TODAY briefs list, and a footer. Everything is laid out top to
+bottom with a running cursor, so no block can overlap the next one.
 
-Run: python3 tools/make_image.py  (writes entry.png beside main.ts)
+Deterministic: no randomness, no clock, no network. Two runs write the
+same bytes. Run from anywhere; the image is written next to this script's
+parent directory as entry.png.
 """
+
+import os
+
 from PIL import Image, ImageDraw, ImageFont
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+TARGET = os.path.join(HERE, "..", "entry.png")
+FONT_DIR = "/usr/share/fonts/truetype/dejavu"
+
+SERIF = os.path.join(FONT_DIR, "DejaVuSerif-Bold.ttf")
+SANS = os.path.join(FONT_DIR, "DejaVuSans-Bold.ttf")
+SANS_PLAIN = os.path.join(FONT_DIR, "DejaVuSans.ttf")
+
 W, H = 1024, 1024
+INK = (0, 0, 0)
+RED = (198, 32, 32)
+GREY = (115, 115, 115)
 PAPER = (255, 255, 255)
-INK = (17, 17, 17)
-GREY = (90, 90, 90)
-RED = (185, 28, 28)
-RULE = (17, 17, 17)
-LIGHT_RULE = (200, 200, 200)
 
-SERIF_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
-SANS_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-SANS = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+LEFT = 44
+RIGHT = 980
+MID = 512
+GUTTER = 24
+COL = (RIGHT - LEFT - GUTTER) // 2  # width of one story column
 
 
-def font(path, size):
+def face(path, size):
+    """A TrueType font at the given size."""
     return ImageFont.truetype(path, size)
 
 
-def wrap(draw, text, fnt, max_w):
-    """Split text into lines that fit max_w, keeping words whole."""
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        trial = (cur + " " + w).strip()
-        if draw.textlength(trial, font=fnt) <= max_w:
-            cur = trial
-        else:
-            if cur:
-                lines.append(cur)
-            cur = w
-    if cur:
-        lines.append(cur)
+def shrink_to_fit(text, path, width, size):
+    """The largest size at or below `size` for which `text` fits `width`."""
+    f = face(path, size)
+    while f.getlength(text) > width and size > 8:
+        size -= 2
+        f = face(path, size)
+    return f
+
+
+def wrap_lines(draw, text, font, width):
+    """Split `text` into lines that fit `width`, breaking on spaces."""
+    lines = []
+    for chunk in text.split("\n"):
+        words = chunk.split()
+        line = ""
+        for word in words:
+            trial = word if not line else line + " " + word
+            if draw.textlength(trial, font=font) <= width:
+                line = trial
+            else:
+                if line:
+                    lines.append(line)
+                line = word
+        if line:
+            lines.append(line)
     return lines
 
 
-def draw_lines(draw, lines, x, y, fnt, fill, leading):
-    for line in lines:
-        draw.text((x, y), line, font=fnt, fill=fill)
+def block(draw, x, y, text, font, width, leading, fill=INK):
+    """Draw wrapped text starting at (x, y); return the y below it."""
+    for line in wrap_lines(draw, text, font, width):
+        draw.text((x, y), line, font=font, fill=fill)
         y += leading
     return y
 
 
+def bar(draw, y, weight, fill=INK, x0=LEFT, x1=RIGHT):
+    """A horizontal rule; return the y just below it."""
+    draw.rectangle([x0, y, x1, y + weight - 1], fill=fill)
+    return y + weight
+
+
+def kicker(draw, x, y, text):
+    """A small red section label; return the y below it."""
+    return block(draw, x, y, text, face(SANS, 19), COL, 24, fill=RED)
+
+
+def story(draw, x, y, label, headline, body):
+    """One grid story: kicker, headline, body. Return the y below it."""
+    y = kicker(draw, x, y, label)
+    y = block(draw, x, y + 2, headline, face(SANS, 24), COL, 30)
+    y = block(draw, x, y + 4, body, face(SANS_PLAIN, 19), COL, 24)
+    return y
+
+
+def brief(draw, x, y, lead, rest):
+    """One ALSO TODAY line: bold lead, then the plain remainder."""
+    bold = face(SANS, 20)
+    plain = face(SANS_PLAIN, 20)
+    draw.text((x, y), lead, font=bold, fill=INK)
+    draw.text((x + draw.textlength(lead, font=bold), y), rest, font=plain, fill=INK)
+    return y + 24
+
+
 def main():
     img = Image.new("RGB", (W, H), PAPER)
-    d = ImageDraw.Draw(img)
-    mx = 36                      # side margin
-    cw = W - 2 * mx              # content width
+    draw = ImageDraw.Draw(img)
 
-    # Outer frame.
-    d.rectangle([10, 10, W - 11, H - 11], outline=INK, width=2)
+    # Outer border.
+    draw.rectangle([28, 28, 996, 996], outline=INK, width=3)
 
-    # Kicker.
-    f_kick = font(SANS_BOLD, 19)
-    d.text((mx, 34), "THE WORLD IN ONE IMAGE", font=f_kick, fill=INK)
-    right = "FRIDAY"
-    d.text((W - mx - d.textlength(right, font=f_kick), 34), right,
-           font=f_kick, fill=RED)
+    y = 40
+    # Eyebrow: the paper's line on the left, the weekday on the right.
+    draw.text((LEFT, y), "THE WORLD IN ONE IMAGE", font=face(SANS, 20), fill=INK)
+    day = "FRIDAY"
+    draw.text((RIGHT - draw.textlength(day, font=face(SANS, 20)), y),
+              day, font=face(SANS, 20), fill=RED)
+    y += 26
 
-    # Masthead.
-    f_mast = font(SERIF_BOLD, 88)
-    d.text((mx, 56), "WORLD NEWS", font=f_mast, fill=INK)
+    # Masthead, as large as fits the page width; advance by its ink height.
+    mast = shrink_to_fit("WORLD NEWS", SERIF, RIGHT - LEFT, 102)
+    draw.text((LEFT, y), "WORLD NEWS", font=mast, fill=INK)
+    y = draw.textbbox((LEFT, y), "WORLD NEWS", font=mast)[3] + 12
 
-    # Red rule, then the date: the line the judge must not miss.
-    d.rectangle([mx, 152, W - mx, 156], fill=RED)
-    f_date = font(SANS_BOLD, 40)
-    d.text((mx, 166), "Friday, 20 November 2026", font=f_date, fill=RED)
-    d.rectangle([mx, 216, W - mx, 218], fill=RULE)
+    y = bar(draw, y, 5, fill=RED) + 8
 
-    # ---- Lead story: Russia's largest strike of November on Ukraine. ----
-    y = 232
-    f_tag = font(SANS_BOLD, 19)
-    d.text((mx, y), "UKRAINE WAR  ·  KYIV AND POLAND", font=f_tag, fill=RED)
-    y += 30
-    f_head = font(SANS_BOLD, 46)
-    lead = "Russia launches its biggest strike of November; missiles fall in Poland"
-    y = draw_lines(d, wrap(d, lead, f_head, cw), mx, y, f_head, INK, 54)
-    y += 6
-    f_body = font(SANS, 22)
-    lead_body = ("More than 400 drones and 110 missiles hit Ukraine overnight, "
-                 "striking three Kyiv bridges and killing at least eight. "
-                 "Two missiles and a drone fall in Poland.")
-    y = draw_lines(d, wrap(d, lead_body, f_body, cw), mx, y, f_body, INK, 30)
-    d.rectangle([mx, 442, W - mx, 444], fill=RULE)
+    # The date, prominent in red.
+    draw.text((LEFT, y), "Friday, 20 November 2026",
+              font=face(SERIF, 33), fill=RED)
+    y += 40
 
-    # ---- Four more stories, 2 by 2. ----
-    stories = [
-        ("WALL STREET",
-         "AI sell-off drags S&P 500 and Dow into correction",
-         "The S&P 500 falls 3.7% and the Nasdaq 5.3% in the worst week "
-         "since 2020; Nvidia drops 14% as its chief is ousted."),
-        ("WHITE HOUSE",
-         "Trump: Putin wants the Ukraine war to end by diplomacy",
-         "In a 90-minute news conference, Trump defends his summit ties "
-         "and vows Iran will never get a nuclear weapon."),
-        ("CYCLONE AKVAN",
-         "Cyclone Akvan hits Odisha after 370,000 evacuated",
-         "The storm makes landfall near Gopalpur with winds to 90 kmph; "
-         "no major damage or loss of life is reported."),
-        ("PERU",
-         "Magnitude 6.7 earthquake shakes central Peru",
-         "The tremor, centred near Jun\u00edn, is felt in Lima; no "
-         "casualties or serious damage are reported."),
-    ]
-    f_stag = font(SANS_BOLD, 17)
-    f_shead = font(SANS_BOLD, 25)
-    f_sbody = font(SANS, 18)
-    col_w = (cw - 28) // 2
-    row_y = [462, 636]
-    for i, (tag, head, body) in enumerate(stories):
-        x = mx + (i % 2) * (col_w + 28)
-        y = row_y[i // 2]
-        d.text((x, y), tag, font=f_stag, fill=RED)
-        y += 26
-        y = draw_lines(d, wrap(d, head, f_shead, col_w), x, y, f_shead, INK, 30)
-        y += 4
-        draw_lines(d, wrap(d, body, f_sbody, col_w), x, y, f_sbody, INK, 24)
-        if i % 2 == 0:
-            d.line([mx + col_w + 14, row_y[i // 2] + 4,
-                    mx + col_w + 14, row_y[i // 2] + 152], fill=LIGHT_RULE, width=1)
-    d.rectangle([mx, 812, W - mx, 814], fill=RULE)
+    y = bar(draw, y, 3) + 8
 
-    # ---- Also today: the rest of the day in one line each. ----
-    y = 824
-    d.text((mx, y), "ALSO TODAY", font=f_tag, fill=INK)
-    y += 28
-    f_also = font(SANS, 19)
-    f_also_b = font(SANS_BOLD, 19)
-    briefs = [
+    # Lead story: Russia's biggest strike of November.
+    y = block(draw, LEFT, y, "UKRAINE WAR  \u00b7  KYIV AND POLAND",
+              face(SANS, 20), RIGHT - LEFT, 25, fill=RED)
+    y = block(draw, LEFT, y + 4,
+              "Russia launches its biggest strike of November; "
+              "missiles fall in Poland",
+              face(SANS, 40), RIGHT - LEFT, 46)
+    y = block(draw, LEFT, y + 6,
+              "More than 400 drones and 110 missiles hit Ukraine overnight, "
+              "striking three Kyiv bridges and killing at least eight. "
+              "Two missiles and a drone fall in Poland.",
+              face(SANS_PLAIN, 21), RIGHT - LEFT, 28)
+    y = bar(draw, y + 10, 3) + 10
+
+    # Two rows of two stories, with a vertical divider between columns.
+    top = y
+    left_y = story(draw, LEFT, y, "WALL STREET",
+                   "AI sell-off drags S&P 500 and Dow into correction",
+                   "The S&P 500 falls 3.7% and the Nasdaq 5.3% in the worst "
+                   "week since 2020; Nvidia drops 14% as its chief is ousted.")
+    right_y = story(draw, MID + GUTTER // 2, y, "WHITE HOUSE",
+                    "Trump: Putin wants the Ukraine war to end by diplomacy",
+                    "In a 90-minute news conference, Trump defends his summit "
+                    "ties and vows Iran will never get a nuclear weapon.")
+    row_end = max(left_y, right_y)
+    draw.line([MID, top, MID, row_end], fill=GREY, width=1)
+
+    top = row_end + 8
+    left_y = story(draw, LEFT, top, "CYCLONE AKVAN",
+                   "Cyclone Akvan hits Odisha after 370,000 evacuated",
+                   "The storm makes landfall near Gopalpur with winds to "
+                   "90 kmph; no major damage or loss of life is reported.")
+    right_y = story(draw, MID + GUTTER // 2, top, "PERU",
+                    "Magnitude 6.7 earthquake shakes central Peru",
+                    "The tremor, centred near Jun\u00edn, is felt in Lima; no "
+                    "casualties or serious damage are reported.")
+    row_end = max(left_y, right_y)
+    draw.line([MID, top, MID, row_end], fill=GREY, width=1)
+
+    y = bar(draw, row_end + 10, 3) + 8
+
+    # Also today: five briefs.
+    draw.text((LEFT, y), "ALSO TODAY", font=face(SANS, 20), fill=INK)
+    y += 24
+    for lead, rest in [
         ("COP31 climate talks stall", " as the draft drops fossil fuels."),
         ("Hungary lifts its veto", " on Ukraine\u2019s EU accession talks."),
         ("Ukraine says it retook 14 settlements", " in Kharkiv region."),
         ("EU sends Ukraine nearly \u20ac8 billion,", " its largest payout yet."),
-        ("US and China agree humans must oversee", " military AI decisions."),
-    ]
-    for bold, rest in briefs:
-        d.text((mx, y), bold, font=f_also_b, fill=INK)
-        d.text((mx + d.textlength(bold, font=f_also_b), y), rest,
-               font=f_also, fill=INK)
-        y += 21
+        ("US and China agree humans must oversee",
+         " military AI decisions."),
+    ]:
+        y = brief(draw, LEFT, y, lead, rest)
 
-    # Footer: restate the date and the claim, plainly.
-    d.rectangle([mx, 958, W - mx, 959], fill=LIGHT_RULE)
-    f_foot = font(SANS, 15)
-    d.text((mx, 968),
-           "All events happened or were first reported on Friday 20 November 2026.",
-           font=f_foot, fill=GREY)
+    y = bar(draw, y + 6, 2, fill=GREY) + 8
+    draw.text((LEFT, y),
+              "All events happened or were first reported on "
+              "Friday 20 November 2026.",
+              font=face(SANS_PLAIN, 16), fill=GREY)
 
-    img.save("entry.png", "PNG", optimize=True)
-    print("wrote entry.png", img.size)
+    img.save(TARGET, "PNG")
 
 
 if __name__ == "__main__":
