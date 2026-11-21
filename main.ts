@@ -1,5 +1,7 @@
 // news-image-20261120: a program that writes one image summing up the world news
-// of Friday 20 November 2026 to /output/entry.png.
+// of Friday 20 November 2026 to /output/entry.png. The entry is the 20 November
+// contest's front page; the program copies the committed image, so the run is
+// deterministic and needs no network.
 //
 // The image is drawn by tools/make_image.py (a front page: Russia's largest
 // strike of November on Ukraine, with missiles falling in Poland; the Wall
